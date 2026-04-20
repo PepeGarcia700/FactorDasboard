@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>S&P 500 — Factor Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e2e8f0; min-height: 100vh; }
+
+/* LOADING */
+#loadingOverlay { position: fixed; inset: 0; background: rgba(13,17,23,0.93); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 200; gap: 14px; }
+#loadingOverlay.hidden { display: none; }
+.spinner { width: 44px; height: 44px; border: 3px solid #1e2d3d; border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.75s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-title { font-size: 15px; font-weight: 600; color: #f1f5f9; }
+.loading-step { font-size: 12px; color: #64748b; }
+.loading-progress { width: 280px; height: 3px; background: #1e2d3d; border-radius: 2px; margin-top: 4px; }
+.loading-progress-bar { height: 100%; background: #3b82f6; border-radius: 2px; transition: width 0.5s; width: 0%; }
+
+/* HEADER */
+header { background: #161b27; border-bottom: 1px solid #21293d; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; }
+.header-left h1 { font-size: 16px; font-weight: 700; color: #fff; }
+.header-left .universe-info { font-size: 11px; color: #64748b; margin-top: 2px; }
+.header-right { display: flex; align-items: center; gap: 12px; }
+.last-updated { font-size: 11px; color: #475569; }
+#refreshBtn { background: #2563eb; color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: background 0.2s; }
+#refreshBtn:hover { background: #1d4ed8; }
+#refreshBtn:disabled { background: #1e2d3d; color: #475569; cursor: not-allowed; }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; }
+.status-dot.loading { background: #f59e0b; animation: pulse 1s infinite; }
+.status-dot.error { background: #ef4444; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* BENCHMARK BAR */
+.bench-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: #21293d; border-bottom: 1px solid #21293d; }
+.bench-cell { background: #161b27; padding: 12px 20px; }
+.bench-lbl { font-size: 10px; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.bench-val { font-size: 22px; font-weight: 700; line-height: 1; }
+.bench-sub { font-size: 10px; color: #475569; margin-top: 3px; }
+.pos { color: #22c55e; }
+.neg { color: #ef4444; }
+.neu { color: #94a3b8; }
+
+/* ERROR */
+.error-bar { background: #2d0f0f; border-bottom: 1px solid #7f1d1d; padding: 10px 24px; font-size: 12px; color: #fca5a5; display: none; }
+
+/* MAIN LAYOUT */
+.layout { display: grid; grid-template-columns: 340px 1fr; min-height: calc(100vh - 160px); }
+
+/* SIDEBAR */
+.sidebar { border-right: 1px solid #21293d; background: #0d1117; overflow-y: auto; }
+.sidebar-section { padding: 14px 14px 6px; }
+.sidebar-section-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #475569; padding: 0 4px 8px; border-bottom: 1px solid #21293d; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; }
+.section-badge { font-size: 9px; padding: 2px 6px; border-radius: 10px; }
+.badge-long { background: #14532d; color: #86efac; }
+.badge-short { background: #450a0a; color: #fca5a5; }
+
+.factor-btn { width: 100%; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 10px 12px; cursor: pointer; color: #e2e8f0; transition: all 0.15s; margin-bottom: 4px; display: block; }
+.factor-btn:hover { background: #161b27; border-color: #21293d; }
+.factor-btn.active { background: #1a2744; border-color: #3b82f6; }
+.factor-btn.long-factor { border-left: 3px solid #22c55e; }
+.factor-btn.short-factor { border-left: 3px solid #ef4444; }
+.fb-top { display: flex; justify-content: space-between; align-items: flex-start; }
+.fb-name { font-size: 12px; font-weight: 600; color: #f1f5f9; }
+.fb-style { font-size: 10px; color: #64748b; margin-top: 1px; }
+.fb-right { text-align: right; }
+.fb-n { font-size: 10px; color: #475569; }
+.fb-source { font-size: 9px; margin-top: 3px; }
+.latency-j1 { color: #86efac; }
+.latency-q { color: #fcd34d; }
+.latency-bi { color: #93c5fd; }
+
+/* MAIN PANEL */
+.main-panel { padding: 20px 24px; overflow-y: auto; }
+
+/* ALPHA CARDS */
+.alpha-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+.alpha-card { background: #161b27; border: 1px solid #21293d; border-radius: 10px; padding: 14px 16px; }
+.alpha-card.highlight { border-color: #2563eb; }
+.ac-label { font-size: 10px; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+.ac-val { font-size: 24px; font-weight: 700; line-height: 1; }
+.ac-sub { font-size: 10px; color: #64748b; margin-top: 4px; }
+.alpha-tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 20px; margin-top: 6px; }
+.alpha-tag.pos { background: #14532d; color: #86efac; }
+.alpha-tag.neg { background: #450a0a; color: #fca5a5; }
+.alpha-tag.neu { background: #1e2d3d; color: #94a3b8; }
+
+/* CHART */
+.chart-card { background: #161b27; border: 1px solid #21293d; border-radius: 12px; padding: 18px 20px; margin-bottom: 16px; }
+.chart-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
+.chart-title { font-size: 14px; font-weight: 700; color: #f1f5f9; }
+.chart-desc { font-size: 11px; color: #64748b; margin-top: 3px; }
+.chart-legend { display: flex; gap: 14px; flex-wrap: wrap; }
+.legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #94a3b8; }
+.legend-dot { width: 10px; height: 3px; border-radius: 2px; }
+.chart-wrapper { position: relative; height: 260px; }
+
+/* TICKERS */
+.tickers-card { background: #161b27; border: 1px solid #21293d; border-radius: 12px; padding: 16px 20px; }
+.tickers-title { font-size: 12px; font-weight: 700; color: #f1f5f9; margin-bottom: 12px; }
+.tickers-section { margin-bottom: 12px; }
+.tickers-section-label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 7px; }
+.ticker-grid { display: flex; flex-wrap: wrap; gap: 5px; }
+.ticker-pill { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 6px; border: 1px solid; }
+.ticker-long { background: #052e16; border-color: #166534; color: #86efac; }
+.ticker-short { background: #2d0f0f; border-color: #7f1d1d; color: #fca5a5; }
+
+.empty-state { text-align: center; padding: 60px 20px; color: #475569; font-size: 13px; }
+.empty-state .icon { font-size: 32px; margin-bottom: 12px; }
+
+/* PERIOD SELECTOR */
+.period-selector { display: flex; gap: 4px; align-items: center; }
+.period-btn { background: transparent; border: 1px solid #21293d; border-radius: 6px; color: #64748b; font-size: 11px; font-weight: 600; padding: 4px 10px; cursor: pointer; transition: all 0.15s; }
+.period-btn:hover { border-color: #3b82f6; color: #93c5fd; }
+.period-btn.active { background: #1a2744; border-color: #3b82f6; color: #60a5fa; }
+</style>
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div id="loadingOverlay">
+  <div class="spinner"></div>
+  <div class="loading-title">Chargement des facteurs S&P 500</div>
+  <div class="loading-step" id="loadingStep">Connexion au serveur Flask...</div>
+  <div class="loading-progress"><div class="loading-progress-bar" id="progressBar"></div></div>
+</div>
+
+<!-- Header -->
+<header>
+  <div class="header-left">
+    <h1>S&P 500 — Factor Dashboard</h1>
+    <div class="universe-info" id="universeInfo">—</div>
+  </div>
+  <div class="header-right">
+    <div class="status-dot" id="statusDot"></div>
+    <div class="last-updated" id="lastUpdated">—</div>
+    <div id="cacheInfo" style="font-size:10px; color:#475569; display:flex; gap:8px; align-items:center;"></div>
+    <button id="clearCacheBtn" onclick="clearCache()" title="Vider le cache et tout recalculer" style="background:transparent; border:1px solid #374151; border-radius:6px; color:#6b7280; font-size:11px; padding:5px 10px; cursor:pointer;">⟳ Reset cache</button>
+    <button id="refreshBtn" onclick="loadData()">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+      Refresh
+    </button>
+  </div>
+</header>
+
+<!-- Benchmark strip -->
+<div class="bench-strip">
+  <div class="bench-cell"><div class="bench-lbl">S&P 500 — 1 jour</div><div class="bench-val" id="b1d">—</div></div>
+  <div class="bench-cell"><div class="bench-lbl">S&P 500 — YTD</div><div class="bench-val" id="bYtd">—</div></div>
+  <div class="bench-cell"><div class="bench-lbl">S&P 500 — 1 an</div><div class="bench-val" id="b1y">—</div></div>
+  <div class="bench-cell"><div class="bench-lbl">S&P 500 — 3 ans</div><div class="bench-val" id="b3y">—</div></div>
+</div>
+
+<div class="error-bar" id="errorBar"></div>
+
+<!-- Main layout -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">
+        Top Facteurs — Long Side
+        <span class="section-badge badge-long">LONG</span>
+      </div>
+      <div id="topList"></div>
+    </div>
+    <div class="sidebar-section" style="margin-top:8px;">
+      <div class="sidebar-section-title">
+        Bottom Facteurs — Short Side
+        <span class="section-badge badge-short">SHORT</span>
+      </div>
+      <div id="bottomList"></div>
+    </div>
+  </div>
+
+  <!-- Main panel -->
+  <div class="main-panel" id="mainPanel">
+    <div class="empty-state">
+      <div class="icon">📊</div>
+      Sélectionne un facteur pour voir les détails
+    </div>
+  </div>
+
+</div>
+
+<script>
+let chartInstance = null;
+let globalData = null;
+let currentFactor = null;
+let currentIsTop = null;
+let currentPeriod = 504;
+const TOP_ORDER = ["beta_2y","price_vs_52w_low","momentum","eps_revision_3m","target_price_6m","fwd_eps_growth_2y","rd_to_sales"];
+const BOT_ORDER = ["low_volatility","net_debt_ebitda","short_interest","accruals"];
+
+function fmt(v, suffix="%", decimals=1) {
+  if (v === null || v === undefined || isNaN(v)) return "—";
+  const sign = v >= 0 ? "+" : "";
+  return sign + v.toFixed(decimals) + suffix;
+}
+
+function colorClass(v) {
+  if (v === null || v === undefined || isNaN(v)) return "neu";
+  return v >= 0 ? "pos" : "neg";
+}
+
+function latencyClass(l) {
+  if (l === "J-1" || l === "~J-1") return "latency-j1";
+  if (l === "Trimestriel") return "latency-q";
+  return "latency-bi";
+}
+
+function setBenchmark(b) {
+  [["b1d", b["1d"]], ["bYtd", b["ytd"]], ["b1y", b["1y"]], ["b3y", b["3y"]]].forEach(([id, v]) => {
+    const el = document.getElementById(id);
+    el.textContent = fmt(v);
+    el.className = "bench-val " + colorClass(v);
+  });
+}
+
+function renderSidebar(factors) {
+  const topEl = document.getElementById("topList");
+  const botEl = document.getElementById("bottomList");
+  topEl.innerHTML = ""; botEl.innerHTML = "";
+
+  [...TOP_ORDER, ...BOT_ORDER].forEach(key => {
+    const f = factors[key];
+    if (!f) return;
+    const isTop = f.category === "top";
+    const btn = document.createElement("button");
+    btn.className = `factor-btn ${isTop ? "long-factor" : "short-factor"}`;
+    btn.id = `btn-${key}`;
+    btn.innerHTML = `
+      <div class="fb-top">
+        <div>
+          <div class="fb-name">${f.name}</div>
+          <div class="fb-style">${f.style}</div>
+        </div>
+        <div class="fb-right">
+          <div class="fb-n">${f.n_valid} titres</div>
+          <div class="fb-source ${latencyClass(f.latency)}">${f.source} · ${f.latency}</div>
+        </div>
+      </div>
+    `;
+    btn.onclick = () => selectFactor(key, factors[key], factors);
+    (isTop ? topEl : botEl).appendChild(btn);
+  });
+}
+
+function alphaTag(val) {
+  if (val === null || val === undefined || isNaN(val)) return `<span class="alpha-tag neu">alpha N/A</span>`;
+  const sign = val >= 0 ? "+" : "";
+  const cls = val >= 0 ? "pos" : "neg";
+  return `<span class="alpha-tag ${cls}">α ${sign}${val.toFixed(1)}%</span>`;
+}
+
+function setPeriod(days) {
+  currentPeriod = days;
+  document.querySelectorAll(".period-btn").forEach(b => {
+    b.classList.toggle("active", parseInt(b.getAttribute("onclick").match(/\d+/)[0]) === days);
+  });
+  if (currentFactor) renderChart(currentFactor, currentIsTop);
+}
+
+function selectFactor(key, f, allFactors) {
+  currentFactor = f;
+  currentIsTop = f.category === "top";
+  // Highlight sidebar button
+  document.querySelectorAll(".factor-btn").forEach(b => b.classList.remove("active"));
+  const btn = document.getElementById(`btn-${key}`);
+  if (btn) btn.classList.add("active");
+
+  const r = f.returns;
+  const isTop = f.category === "top";
+  const bench = r.benchmark;
+  const alphaL = r.alpha_long;
+  const alphaS = r.alpha_short;
+
+  const panel = document.getElementById("mainPanel");
+  panel.innerHTML = `
+    <!-- Alpha cards -->
+    <div class="alpha-grid">
+      ${isTop ? `
+      <div class="alpha-card">
+        <div class="ac-label">Long Q5 — 1 an</div>
+        <div class="ac-val ${colorClass(r.long["1y"])}">${fmt(r.long["1y"])}</div>
+        <div class="ac-sub">vs S&P 500 ${fmt(bench["1y"])}</div>
+        ${alphaTag(alphaL["1y"])}
+      </div>
+      <div class="alpha-card">
+        <div class="ac-label">Long Q5 — 3 ans</div>
+        <div class="ac-val ${colorClass(r.long["3y"])}">${fmt(r.long["3y"])}</div>
+        <div class="ac-sub">vs S&P 500 ${fmt(bench["3y"])}</div>
+        ${alphaTag(alphaL["3y"])}
+      </div>
+      ` : `
+      <div class="alpha-card">
+        <div class="ac-label">Short Q1 — 1 an</div>
+        <div class="ac-val ${colorClass(r.short["1y"])}">${fmt(r.short["1y"])}</div>
+        <div class="ac-sub">-S&P 500 ${fmt(bench["1y"] !== null ? -bench["1y"] : null)}</div>
+        ${alphaTag(alphaS["1y"])}
+      </div>
+      <div class="alpha-card">
+        <div class="ac-label">Short Q1 — 3 ans</div>
+        <div class="ac-val ${colorClass(r.short["3y"])}">${fmt(r.short["3y"])}</div>
+        <div class="ac-sub">-S&P 500 ${fmt(bench["3y"] !== null ? -bench["3y"] : null)}</div>
+        ${alphaTag(alphaS["3y"])}
+      </div>
+      `}
+      <div class="alpha-card highlight">
+        <div class="ac-label">Titres analysés</div>
+        <div class="ac-val neu">${f.n_valid}</div>
+        <div class="ac-sub">sur ${globalData.universe.with_price_data} avec données prix</div>
+        <div class="alpha-tag neu" style="margin-top:6px;">${f.source} · ${f.latency}</div>
+      </div>
+    </div>
+
+    <!-- Chart -->
+    <div class="chart-card">
+      <div class="chart-header">
+        <div>
+          <div class="chart-title">${f.name} — Performance cumulée</div>
+          <div class="chart-desc">${f.description}</div>
+        </div>
+        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
+          <div class="period-selector" id="periodSelector">
+            <button class="period-btn" onclick="setPeriod(21)">1M</button>
+            <button class="period-btn" onclick="setPeriod(63)">3M</button>
+            <button class="period-btn" onclick="setPeriod(126)">6M</button>
+            <button class="period-btn" onclick="setPeriod(252)">1A</button>
+            <button class="period-btn active" onclick="setPeriod(504)">2A</button>
+          </div>
+          <div class="chart-legend" id="chartLegend"></div>
+        </div>
+      </div>
+      <div class="chart-wrapper">
+        <canvas id="factorChart" role="img" aria-label="Performance cumulée du facteur ${f.name}">Graphique de performance</canvas>
+      </div>
+    </div>
+
+    <!-- Tickers -->
+    <div class="tickers-card">
+      <div class="tickers-title">${f.name} — Quintiles Long / Short</div>
+      <div class="tickers-section">
+        <div class="tickers-section-label">Quintile Long — Q5 (score le plus élevé)</div>
+        <div class="ticker-grid" id="longTickers"></div>
+      </div>
+      <div class="tickers-section">
+        <div class="tickers-section-label">Quintile Short — Q1 (score le plus faible)</div>
+        <div class="ticker-grid" id="shortTickers"></div>
+      </div>
+    </div>
+  `;
+
+  // Render tickers
+  f.long_tickers.forEach(t => {
+    document.getElementById("longTickers").innerHTML += `<span class="ticker-pill ticker-long">${t}</span>`;
+  });
+  f.short_tickers.forEach(t => {
+    document.getElementById("shortTickers").innerHTML += `<span class="ticker-pill ticker-short">${t}</span>`;
+  });
+
+  // Render chart
+  renderChart(f, isTop);
+}
+
+function renderChart(f, isTop) {
+  const perf = f.performance;
+
+  // Filter to selected period
+  function filterPeriod(arr) {
+    if (!arr || arr.length === 0) return [];
+    return arr.slice(-currentPeriod);
+  }
+  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+
+  const ctx = document.getElementById("factorChart");
+  if (!ctx) return;
+
+  // Build datasets
+  const datasets = [];
+  const legendEl = document.getElementById("chartLegend");
+  legendEl.innerHTML = "";
+
+  function addSeries(data, label, color, dashed=false) {
+    if (!data || data.length === 0) return;
+    datasets.push({
+      label,
+      data: data.map(d => ({ x: d.date, y: d.value })),
+      borderColor: color,
+      backgroundColor: "transparent",
+      borderWidth: dashed ? 1.5 : 2,
+      borderDash: dashed ? [4,3] : [],
+      pointRadius: 0,
+      tension: 0.3
+    });
+    legendEl.innerHTML += `
+      <div class="legend-item">
+        <div class="legend-dot" style="background:${color}; ${dashed ? "opacity:0.6;" : ""}"></div>
+        ${label}
+      </div>`;
+  }
+
+  if (isTop) {
+    addSeries(filterPeriod(perf.long),      "Long Q5",    "#22c55e");
+    addSeries(filterPeriod(perf.benchmark), "S&P 500",    "#3b82f6", true);
+    addSeries(filterPeriod(perf.ls_spread), "Spread L/S", "#a78bfa", true);
+  } else {
+    addSeries(filterPeriod(perf.short),         "Short Q1",   "#ef4444");
+    addSeries(filterPeriod(perf.neg_benchmark), "-S&P 500",   "#3b82f6", true);
+  }
+
+  if (datasets.length === 0) {
+    ctx.parentElement.innerHTML = `<div style="text-align:center;padding:60px;color:#475569;font-size:12px;">Historique non disponible pour ce facteur</div>`;
+    return;
+  }
+
+  chartInstance = new Chart(ctx, {
+    type: "line",
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: c => `${c.dataset.label}: ${c.raw.y >= 0 ? "+" : ""}${c.raw.y.toFixed(2)}%`
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: "category",
+          ticks: { color: "#475569", maxTicksLimit: 10, font: { size: 10 } },
+          grid: { color: "#1a2233" }
+        },
+        y: {
+          ticks: {
+            color: "#475569", font: { size: 10 },
+            callback: v => (v >= 0 ? "+" : "") + v.toFixed(1) + "%"
+          },
+          grid: { color: "#1a2233" }
+        }
+      }
+    }
+  });
+}
+
+async function clearCache() {
+  if (!confirm("Vider le cache ? Le prochain refresh recalculera tout (10-20 min).")) return;
+  try {
+    await fetch("http://localhost:5000/api/cache/clear");
+    alert("Cache vidé. Lance un Refresh pour recalculer.");
+  } catch(e) {
+    alert("Erreur: " + e.message);
+  }
+}
+
+async function loadData() {
+  const btn = document.getElementById("refreshBtn");
+  const overlay = document.getElementById("loadingOverlay");
+  const statusDot = document.getElementById("statusDot");
+  const errorBar = document.getElementById("errorBar");
+  const progress = document.getElementById("progressBar");
+
+  btn.disabled = true;
+  overlay.classList.remove("hidden");
+  statusDot.className = "status-dot loading";
+  errorBar.style.display = "none";
+  progress.style.width = "0%";
+
+  const steps = [
+    [5,  "Récupération de la liste S&P 500 (Wikipedia)..."],
+    [15, "Téléchargement des prix — 500 titres en batch..."],
+    [35, "Calcul Beta 2Y, Momentum, Volatilité..."],
+    [55, "Données fondamentales (R&D, Dette, Accruals, SI)..."],
+    [75, "Données analystes FMP (EPS revision, Target price)..."],
+    [90, "Calcul des spreads Long-Short et performances..."],
+    [98, "Finalisation..."]
+  ];
+  let si = 0;
+  const stepTimer = setInterval(() => {
+    if (si < steps.length) {
+      const [pct, label] = steps[si++];
+      document.getElementById("loadingStep").textContent = label;
+      progress.style.width = pct + "%";
+    }
+  }, 12000);
+
+  try {
+    const resp = await fetch("http://localhost:5000/api/factors");
+    clearInterval(stepTimer);
+    progress.style.width = "100%";
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error || `HTTP ${resp.status}`);
+    }
+
+    const data = await resp.json();
+    globalData = data;
+
+    // Benchmark
+    setBenchmark(data.benchmark);
+
+    // Universe info
+    const u = data.universe;
+    document.getElementById("universeInfo").textContent =
+      `${u.with_price_data}/${u.requested} titres avec données · ${u.source} · ${data.elapsed_seconds}s`;
+    document.getElementById("lastUpdated").textContent = "Mis à jour : " + data.last_updated;
+
+    // Sidebar
+    renderSidebar(data.factors);
+
+    // Auto-select first
+    const firstKey = TOP_ORDER[0];
+    if (data.factors[firstKey]) selectFactor(firstKey, data.factors[firstKey], data.factors);
+
+    statusDot.className = "status-dot";
+
+    // Cache status display
+    if (data.cache_status) {
+      const cs = data.cache_status;
+      const tags = Object.entries(cs).map(([k, v]) => {
+        const color = v.fresh ? "#22c55e" : "#f59e0b";
+        const label = {"prices":"Prix","fundamentals":"Fondamentaux","fmp":"FMP","tickers":"Tickers"}[k] || k;
+        const age = v.age_minutes ? `${v.age_minutes}min` : "—";
+        return `<span style="color:${color}; font-size:10px;" title="${label}: ${age}">${label} ${v.fresh ? "✓" : "⚠"}</span>`;
+      });
+      document.getElementById("cacheInfo").innerHTML = tags.join(" · ");
+    }
+
+  } catch (err) {
+    clearInterval(stepTimer);
+    errorBar.style.display = "block";
+    errorBar.textContent = `⚠ Erreur : ${err.message} — Vérifiez que le serveur Flask est lancé (python app.py dans le terminal VS Code)`;
+    statusDot.className = "status-dot error";
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => overlay.classList.add("hidden"), 300);
+  }
+}
+
+window.onload = loadData;
+</script>
+</body>
+</html>
