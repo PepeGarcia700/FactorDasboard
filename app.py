@@ -230,3 +230,4 @@ if __name__ == "__main__":
     threading.Thread(target=open_browser).start()
     app.run(debug=False, port=5000)
     #test
+    print("test")
